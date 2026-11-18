@@ -22,17 +22,17 @@ static uint32_t audio_cpu_q8, audio_cpu_rem;           /* the load, 256 = 100 % 
 
 static void audio_block(int32_t *out)                   /* one block, interleaved Q15 -> 24 bit */
 {
-    int32_t l[BLK], r[BLK], snd[BLK], mg = gr_master_q12;
+    int32_t l[BLK], r[BLK], snd[BLK], rsnd[BLK], mg = gr_master_q12;
     uint32_t i;
     ac_midi_block();
     ac_keys_block();
     for (i = 0; i < BLK; i++)
-        l[i] = r[i] = snd[i] = 0;
+        l[i] = r[i] = snd[i] = rsnd[i] = 0;
     for (i = 0; i < BLK; i += SUB) {                    /* the sequencer every 32 frames, the voices between */
         seq_run();
-        voices_render(l + i, r + i, snd + i, SUB);
+        voices_render(l + i, r + i, snd + i, rsnd + i, SUB);
     }
-    fx_render(l, r, snd, BLK);
+    fx_render(l, r, snd, rsnd, BLK);
     for (i = 0; i < BLK; i++) {
         out[2u * i] = (sat16(l[i]) * mg) >> 12;
         out[2u * i + 1u] = (sat16(r[i]) * mg) >> 12;

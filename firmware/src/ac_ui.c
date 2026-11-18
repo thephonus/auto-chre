@@ -141,14 +141,16 @@ static void draw_choice_dots(int32_t cx, int32_t cy, int32_t count, int32_t inde
 #define NONE_ {CL_NONE, 0}
 static const cl_t PG_PATRON[2][4] = {{G_(G_TEMPO), G_(G_SWING), G_(G_MUTR), G_(G_MUTS)},
                                      {T_(T_MUTE), T_(T_LOCK), T_(T_PROB), T_(T_VAR)}};
-static const cl_t PG_SONIDO[2][4] = {{T_(T_TYPE), T_(T_E1), T_(T_E2), T_(T_E3)}, {T_(T_E4), T_(T_E5), T_(T_E6), T_(T_VAR)}};
-static const cl_t PG_VOZ[2][4] = {{T_(T_LEVEL), T_(T_PAN), T_(T_SEND), T_(T_TUNE)}, {T_(T_BITS), T_(T_DECIM), NONE_, NONE_}};
+static const cl_t PG_SONIDO[3][4] = {{T_(T_TYPE), T_(T_E1), T_(T_E2), T_(T_E3)}, {T_(T_E4), T_(T_E5), T_(T_E6), T_(T_VAR)},
+                                     {T_(T_NOTES), T_(T_RANGE), T_(T_SCALE), T_(T_TUNE)}};
+static const cl_t PG_VOZ[2][4] = {{T_(T_LEVEL), T_(T_PAN), T_(T_SEND), T_(T_RSEND)}, {T_(T_BITS), T_(T_DECIM), T_(T_TUNE), NONE_}};
 static const cl_t PG_RITMO[2][4] = {{T_(T_LEN), T_(T_DIV), T_(T_PULSES), T_(T_ROT)},
                                     {T_(T_PROB), T_(T_RATCH), T_(T_MICRO), T_(T_TURING)}};
-static const cl_t PG_FX[3][4] = {{G_(G_COMBHZ), G_(G_COMBFB), G_(G_COMBMIX), G_(G_DLYMIX)},
+static const cl_t PG_FX[4][4] = {{G_(G_COMBHZ), G_(G_COMBFB), G_(G_COMBMIX), G_(G_DLYMIX)},
                                  {G_(G_DLYT), G_(G_DLYFB), G_(G_DRIVE), G_(G_VOLUME)},
+                                 {G_(G_REVMIX), G_(G_REVDECAY), G_(G_REVDAMP), T_(T_RSEND)},
                                  {G_(G_STUTP), G_(G_STUTL), NONE_, NONE_}};
-static const cl_t PG_AFINAR[1][4] = {{G_(G_ROOT), G_(G_MODE), G_(G_QUANT), T_(T_TUNE)}};
+static const cl_t PG_AFINAR[1][4] = {{G_(G_ROOT), G_(G_MODE), G_(G_QUANT), T_(T_SCALE)}};
 static const cl_t PG_SISTEMA[1][4] = {{G_(G_MIDICH), G_(G_SYNC), NONE_, NONE_}};
 static const cl_t PG_PRESETS[1][4] = {{{CL_SLOT, 0}, {CL_LOAD, 0}, NONE_, NONE_}};
 
@@ -156,10 +158,10 @@ static const char *ui_page_name(uint32_t sc, uint32_t sub)
 {
     switch (sc) {
     case SC_PATRON: return sub ? "Pista" : "Patr\363n";
-    case SC_SONIDO: return sub ? "Sonido 2" : "Sonido";
+    case SC_SONIDO: return sub == 0 ? "Sonido" : sub == 1 ? "Sonido 2" : "Notas en escala";
     case SC_VOZ: return sub ? "Voz: destrozo" : "Voz";
     case SC_RITMO: return sub ? "Ritmo: azar" : "Ritmo";
-    case SC_FX: return sub == 0 ? "Comb" : sub == 1 ? "Delay y salida" : "Stutter";
+    case SC_FX: return sub == 0 ? "Comb" : sub == 1 ? "Delay y salida" : sub == 2 ? "Reverb" : "Stutter";
     default: return SC_TITLE[sc];
     }
 }
@@ -170,10 +172,10 @@ static uint32_t ui_cells(uint32_t sc, uint32_t sub, cl_t *c)
     uint32_t n = 1, i;
     switch (sc) {
     case SC_PATRON: t = PG_PATRON; n = 2; break;
-    case SC_SONIDO: t = PG_SONIDO; n = 2; break;
+    case SC_SONIDO: t = PG_SONIDO; n = 3; break;
     case SC_VOZ: t = PG_VOZ; n = 2; break;
     case SC_RITMO: t = PG_RITMO; n = 2; break;
-    case SC_FX: t = PG_FX; n = 3; break;
+    case SC_FX: t = PG_FX; n = 4; break;
     case SC_AFINAR: t = PG_AFINAR; break;
     case SC_SISTEMA: t = PG_SISTEMA; break;
     default: t = PG_PRESETS; break;
@@ -455,7 +457,8 @@ static void sound_preview(uint32_t k)
     if (key == prev_key)
         return;
     prev_key = key;
-    voice_setup(&prev_v, tp[k], 110u, 0);
+    prev_v.ks = ks_mem[NTRK];
+    voice_setup(&prev_v, tp[k], 110u, 0, 0);
     for (x = 0; x < 240u; x++) {
         int32_t pk = 0;
         for (i = 0; i < per; i++) {
@@ -563,6 +566,10 @@ static void fx_strip(int32_t top)
             lv = lv * (30 + gp[G_DLYFB] * 70 / 95) / 100;
         }
     }
+    {   /* the reverb: a cloud that grows with the tail, as bright as the mix */
+        int32_t rr = 6 + gp[G_REVDECAY] / 4, a = 15 + gp[G_REVMIX] / 2;
+        cv_glow(206, 64, rr, ux_mix(UC_SAND, UC_TEXT, 100 - gp[G_REVDAMP]), a);
+    }
     if (st >= 0)
         cv_text_in(0, 106, 240, &AF_M, STUT_NAMES[st], UC_WARN, UC_BG);
     pic_end(top);
@@ -572,20 +579,21 @@ static void fx_strip(int32_t top)
 static void afinar_strip(int32_t top)
 {
     static const uint8_t BLACK[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
-    uint32_t root = (uint32_t)gp[G_ROOT], m = (uint32_t)gp[G_MODE], i, k;
+    uint32_t root = (uint32_t)gp[G_ROOT], m = (uint32_t)trk_mode(tp[ui.trk]), i, k;
+    int32_t lit = gp[G_QUANT] || tp[ui.trk][T_NOTES];
     char name[32];
     pic_begin(top);
     str_cpy(name, KEY_NAMES[root], sizeof name);
     str_cpy(name + str_len(name), " ", 2);
     str_cpy(name + str_len(name), MODE_NAMES[m], 20);
-    cv_text_in(0, 10, 240, &AF_M, name, gp[G_QUANT] ? UC_TEXT : UC_UNLIT, UC_BG);
+    cv_text_in(0, 10, 240, &AF_M, name, lit ? UC_TEXT : UC_UNLIT, UC_BG);
     for (i = 0; i < 12u; i++) {
         uint32_t note = (root + i) % 12u, in = 0;
         int32_t x = 6 + (int32_t)i * 19, h = BLACK[note] ? 46 : 62;
         for (k = 0; k < MODE_N[m]; k++)
             if (MODE_DEG[m][k] == i)
                 in = 1;
-        cv_rrect(x, 50, 16, h, 4, in ? (i == 0u ? UC_CORAL : ux_mix(UC_BG, UC_SAND, gp[G_QUANT] ? 85 : 40)) : UC_PANEL, UC_BG);
+        cv_rrect(x, 50, 16, h, 4, in ? (i == 0u ? UC_CORAL : ux_mix(UC_BG, UC_SAND, lit ? 85 : 40)) : UC_PANEL, UC_BG);
         cv_text_in(x - 2, 114, 20, &AF_S, KEY_NAMES[note], in ? UC_TEXT : UC_UNLIT, UC_BG);
     }
     pic_end(top);

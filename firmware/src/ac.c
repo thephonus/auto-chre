@@ -35,7 +35,7 @@
 #define FELUCCA_ID "FM-1_947"    /* package identity (build.py: the .fwsc marker string) */
 #endif
 #ifndef FELUCCA_VERSION
-#define FELUCCA_VERSION "auto-chre 0.1"
+#define FELUCCA_VERSION "auto-chre 0.2"
 #endif
 #if FELUCCA_OTA && !FELUCCA_FLASH
 #error "FELUCCA_OTA needs FELUCCA_FLASH"

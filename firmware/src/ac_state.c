@@ -2,7 +2,7 @@
  * auto-chre: the state in flash: the current state (restored at power-on, saved a few seconds after the last change
  * while the sequencer is stopped and nothing sounds: a flash write stops the audio for a moment) and 16 presets.
  * A state is the shared values, the six tracks' values and their patterns. */
-#define ST_VER 0xC1u                             /* auto-chre 0.1 */
+#define ST_VER 0xC2u                             /* auto-chre 0.2 */
 #define BLOB_N (2u + G_COUNT * 2u + NTRK * T_COUNT * 2u + NTRK * NSTEP * 4u)
 _Static_assert(BLOB_N <= ST_PAYLOAD_MAX, "a state must fit a storage object");
 static uint8_t blob[BLOB_N], pbuf[BLOB_N];
@@ -75,6 +75,10 @@ static void state_defaults(void)
     tp[4][T_PROB] = 70;
     tp[5][T_TURING] = 20;
     tp[1][T_RATCH] = 15;
+    tp[5][T_NOTES] = 5;                           /* the modal voice wanders the scale (Turing) */
+    tp[5][T_RANGE] = 2;
+    tp[5][T_RSEND] = 45;
+    tp[3][T_RSEND] = 25;
 }
 
 /* --------------------------------------------------------- presets --- */

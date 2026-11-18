@@ -67,15 +67,15 @@ static int fails;
 
 static void block(int32_t *l, int32_t *r)
 {
-    int32_t snd[BLK];
+    int32_t snd[BLK], rsnd[BLK];
     uint32_t i;
     for (i = 0; i < BLK; i++)
-        l[i] = r[i] = snd[i] = 0;
+        l[i] = r[i] = snd[i] = rsnd[i] = 0;
     for (i = 0; i < BLK; i += SUB) {
         seq_run();
-        voices_render(l + i, r + i, snd + i, SUB);
+        voices_render(l + i, r + i, snd + i, rsnd + i, SUB);
     }
-    fx_render(l, r, snd, BLK);
+    fx_render(l, r, snd, rsnd, BLK);
 }
 
 static void save_ppm(const char *dir, const char *name)
@@ -100,11 +100,12 @@ int main(int argc, char **argv)
 {
     const char *wavp = argc > 1 ? argv[1] : 0, *uidir = argc > 2 ? argv[2] : 0;
     uint32_t k, b, e;
+    reverb_init();
     state_defaults();
 
     /* every engine: a hit alone sounds and dies away */
     for (e = 0; e < EN_COUNT; e++) {
-        int32_t l[BLK], r[BLK], snd[BLK];
+        int32_t l[BLK], r[BLK], snd[BLK], rsnd[BLK];
         double early = 0, late = 0;
         uint32_t i, peak = 0;
         memset(vo, 0, sizeof vo);
@@ -117,7 +118,8 @@ int main(int argc, char **argv)
             memset(l, 0, sizeof l);
             memset(r, 0, sizeof r);
             memset(snd, 0, sizeof snd);
-            voices_render(l, r, snd, BLK);
+            memset(rsnd, 0, sizeof rsnd);
+            voices_render(l, r, snd, rsnd, BLK);
             for (i = 0; i < BLK; i++) {
                 double v = (double)l[i] * l[i];
                 if ((uint32_t)abs(l[i]) > peak)
@@ -136,6 +138,57 @@ int main(int argc, char **argv)
     }
     state_defaults();
     memset(vo, 0, sizeof vo);
+
+    /* the notes: a tonal voice with Notas Azar in D Mixolydian-ish (D, Mayor) only plays notes of that scale */
+    {
+        uint32_t m, h, bad = 0, seen = 0;
+        tp[0][T_TYPE] = EN_CHIP;
+        tp[0][T_E4] = 0;                                          /* no arpeggio */
+        tp[0][T_VAR] = 60;
+        tp[0][T_NOTES] = 1;
+        tp[0][T_RANGE] = 2;
+        gp[G_ROOT] = 2;
+        for (m = 1; m <= NMODES; m++) {
+            tp[0][T_SCALE] = (int16_t)m;
+            for (h = 0; h < 40u; h++) {
+                double hz, note;
+                int rel, k, in = 0;
+                voice_hit(0, 100);
+                hz = (double)vo[0].dph[0] * FS / 4294967296.0;
+                note = 12.0 * log2(hz / 440.0) + 69.0;
+                rel = (((int)lround(note) - 2) % 12 + 12) % 12;
+                for (k = 0; k < MODE_N[m - 1]; k++)
+                    if (MODE_DEG[m - 1][k] == rel)
+                        in = 1;
+                if (!in || fabs(note - lround(note)) > 0.05)
+                    bad++;
+                seen |= 1u << rel;
+            }
+        }
+        CHECK(bad == 0, "Notas: every note in its scale (%u out)", bad);
+        CHECK(__builtin_popcount(seen) >= 7, "Notas: the notes move");
+        state_defaults();
+        memset(vo, 0, sizeof vo);
+    }
+    /* the reverb: a hit sent to it still rings half a second later */
+    {
+        int32_t l[BLK], r[BLK];
+        double tail = 0;
+        uint32_t i;
+        gp[G_REVMIX] = 80;
+        gp[G_REVDECAY] = 80;
+        tp[3][T_RSEND] = 100;
+        voice_hit(3, 120);
+        for (b = 0; b < 300u; b++) {
+            block(l, r);
+            if (b > 170u)
+                for (i = 0; i < BLK; i++)
+                    tail += (double)l[i] * l[i];
+        }
+        CHECK(sqrt(tail / (129.0 * BLK)) > 30, "the reverb rings on (rms %.0f)", sqrt(tail / (129.0 * BLK)));
+        state_defaults();
+        memset(vo, 0, sizeof vo);
+    }
 
     /* the polymeters: in 4 bars, a 7-step track at 1/16 comes round 64 / 7 times */
     {

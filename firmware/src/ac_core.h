@@ -79,8 +79,11 @@ typedef struct {
 } ac_pinfo_t;
 
 /* the engines of a track */
-enum { EN_KICK, EN_METAL, EN_NOISE, EN_CLICK, EN_GLITCH, EN_FM, EN_COUNT };
-static const char *const ENGINE_NAMES[EN_COUNT] = {"Bombo", "Metal", "Ruido", "Clic", "Glitch", "FM"};
+enum { EN_KICK, EN_METAL, EN_NOISE, EN_CLICK, EN_GLITCH, EN_FM, EN_PLUCK, EN_MODAL, EN_ACID, EN_CHIP, EN_COUNT };
+static const char *const ENGINE_NAMES[EN_COUNT] = {"Bombo", "Metal", "Ruido", "Clic", "Glitch", "FM", "Cuerda", "Modal",
+                                                   "Ácido", "Chip"};
+/* the engines with a real pitch: their Tono is the octave of the root (Afinar) and they play in the scale */
+#define EN_TONAL(e) ((e) >= EN_PLUCK)
 /* what the six engine settings E1 .. E6 are called on each engine (all 0 .. 100) */
 static const char *const ENGINE_P[EN_COUNT][6] = {
     {"Tono", "Ca\355da", "Barrido", "Vel. barr.", "Clic", "Saturar"},
@@ -89,12 +92,19 @@ static const char *const ENGINE_P[EN_COUNT][6] = {
     {"Tono", "Longitud", "Forma", "Ca\355da tono", "Repetir", "Separac."},
     {"Tono", "Trozo", "Atr\341s", "Reverso", "Repetir", "Forma"},
     {"Tono", "Ratio", "\315ndice", "Ca\355da \355nd.", "Ca\355da", "Realim."},
+    {"Octava", "Ca\355da", "Brillo", "Excitar", "Posici\363n", "Saturar"},
+    {"Octava", "Ca\355da", "Material", "Dureza", "Golpe", "Inarmon."},
+    {"Octava", "Ca\355da", "Corte", "Reso", "Env. filtro", "Onda"},
+    {"Octava", "Ca\355da", "Pulso", "Arpegio", "Desliz", "Vibrato"},
 };
+static const char *const NOTE_MODES[] = {"Fija", "Azar", "Sube", "Baja", "P\351ndulo", "Turing"};
 static const char *const DIV_NAMES[] = {"1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4"};
 static const uint8_t DIV_TICKS[] = {12, 16, 24, 32, 48, 96};
 static const char *const STUT_NAMES[] = {"1/4", "1/8", "1/16", "1/32", "1/64"};
 static const uint8_t STUT_TICKS[] = {96, 48, 24, 12, 6};
 static const char *const NOSI[] = {"No", "S\355"};
+static const char *const SCALE_NAMES[] = {"Global", "Crom\341tica", "Mayor", "Menor", "D\363rico", "Frigio", "Penta men.",
+                                          "Hirajoshi", "Tonos ent."};
 static const char *const SYNC_NAMES[] = {"Interno", "MIDI"};
 static const char *const KEY_NAMES[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
 #define NMODES 8
@@ -106,7 +116,8 @@ static const uint8_t MODE_DEG[NMODES][12] = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 
                                              {0, 2, 4, 6, 8, 10}};
 
 /* a track's parameters */
-enum { T_TYPE, T_E1, T_E2, T_E3, T_E4, T_E5, T_E6, T_VAR, T_LEVEL, T_PAN, T_SEND, T_TUNE, T_BITS, T_DECIM,
+enum { T_TYPE, T_E1, T_E2, T_E3, T_E4, T_E5, T_E6, T_VAR, T_LEVEL, T_PAN, T_SEND, T_RSEND, T_TUNE, T_NOTES, T_RANGE,
+       T_SCALE, T_BITS, T_DECIM,
        T_LEN, T_DIV, T_PULSES, T_ROT, T_PROB, T_RATCH, T_MICRO, T_TURING, T_MUTE, T_LOCK, T_COUNT };
 static const ac_pinfo_t TP[T_COUNT] = {
     {"Motor", 0, EN_COUNT - 1, 0, U_CHOICE, ENGINE_NAMES},
@@ -115,8 +126,12 @@ static const ac_pinfo_t TP[T_COUNT] = {
     {"Variaci\363n", 0, 100, 20, U_PCT, 0},
     {"Nivel", 0, 100, 80, U_PCT, 0},
     {"Panorama", -50, 50, 0, U_BIP, 0},
-    {"Env\355o FX", 0, 100, 15, U_PCT, 0},
+    {"Delay", 0, 100, 15, U_PCT, 0},
+    {"Reverb", 0, 100, 10, U_PCT, 0},
     {"Afinar", -24, 24, 0, U_SEMI, 0},
+    {"Notas", 0, 5, 0, U_CHOICE, NOTE_MODES},
+    {"Rango", 1, 3, 1, U_NUM, 0},
+    {"Esc. pista", 0, NMODES, 0, U_CHOICE, SCALE_NAMES},
     {"Bits", 2, 16, 16, U_NUM, 0},
     {"Decimar", 1, 32, 1, U_NUM, 0},
     {"Pasos", 1, NSTEP, 16, U_NUM, 0},
@@ -133,6 +148,7 @@ static const ac_pinfo_t TP[T_COUNT] = {
 
 /* the shared parameters */
 enum { G_TEMPO, G_SWING, G_MUTR, G_MUTS, G_STUTP, G_STUTL, G_COMBHZ, G_COMBFB, G_COMBMIX, G_DLYT, G_DLYFB, G_DLYMIX,
+       G_REVMIX, G_REVDECAY, G_REVDAMP,
        G_DRIVE, G_VOLUME, G_ROOT, G_MODE, G_QUANT, G_MIDICH, G_SYNC, G_COUNT };
 static const ac_pinfo_t GP[G_COUNT] = {
     {"Tempo", 40, 240, 128, U_BPM, 0},
@@ -147,10 +163,13 @@ static const ac_pinfo_t GP[G_COUNT] = {
     {"Delay", 0, 5, 3, U_CHOICE, DIV_NAMES},
     {"Delay realim.", 0, 95, 40, U_PCT, 0},
     {"Delay mezcla", 0, 100, 35, U_PCT, 0},
+    {"Reverb", 0, 100, 40, U_PCT, 0},
+    {"Cola", 0, 95, 70, U_PCT, 0},
+    {"Oscurecer", 0, 100, 40, U_PCT, 0},
     {"Saturar", 0, 100, 20, U_PCT, 0},
     {"Volumen", 0, 100, 80, U_PCT, 0},
     {"Ra\355z", 0, 11, 0, U_CHOICE, KEY_NAMES},
-    {"Modo", 0, NMODES - 1, 0, U_CHOICE, MODE_NAMES},
+    {"Escala", 0, NMODES - 1, 3, U_CHOICE, MODE_NAMES},
     {"Cuantizar", 0, 1, 0, U_CHOICE, NOSI},
     {"Canal MIDI", 0, 15, 9, U_CH, 0},
     {"Reloj", 0, 1, 0, U_CHOICE, SYNC_NAMES},
@@ -175,7 +194,7 @@ static const int16_t TRK_DEF[NTRK][8] = {
     {EN_NOISE, 70, 30, 12, 50, 40, 0, 7},
     {EN_CLICK, 60, 10, 30, 50, 30, 30, 3},
     {EN_GLITCH, 50, 30, 50, 30, 40, 50, 2},
-    {EN_FM, 35, 45, 55, 30, 30, 20, 5},
+    {EN_MODAL, 45, 45, 30, 50, 30, 20, 5},
 };
 static const int16_t TRK_LEN[NTRK] = {16, 16, 16, 12, 9, 7};      /* polymeters from the start */
 

@@ -139,6 +139,7 @@ static void fm1_main(void)
     fm1_irq_enable_all();
     fm1_delay_ms(30);
     splash_status("cargando\205");
+    reverb_init();
     state_boot();                             /* the last session's state */
     for (ms = 0; ms < 300u; ms += 10u) {      /* the splash; the pot followed (MIDI IN plays under it) */
         fm1_delay_ms(10);

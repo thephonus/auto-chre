@@ -7,6 +7,14 @@
  *   Clic    short blips (sine, square or impulses) that fall in pitch, repeated in bursts
  *   Glitch  a slice of what auto-chre just played (the last 1.5 s), pitched, reversed, looped
  *   FM      two-operator FM with a decaying index and feedback, inharmonic ratios
+ *   Cuerda  a plucked string (Karplus-Strong): a burst of noise or a pulse in a tuned delay line that darkens
+ *   Modal   a struck object: four tuned resonators (bar, glass, bell, membrane), a hard or soft strike
+ *   Ácido   a saw or square through a resonant low-pass whose cutoff falls with the note
+ *   Chip    a pulse wave, its width, a fast arpeggio over the scale, a slide and vibrato
+ *
+ * The tonal engines (Cuerda, Modal, Ácido, Chip) sound the root's note in the octave Tono sets; on every engine the
+ * Notas of the track move the pitch by degrees of its scale (Fija, Azar, Sube, Baja, Péndulo, Turing), and with
+ * Cuantizar, or Notas other than Fija, everything lands in the scale.
  *
  * Every hit is a little different: Variación moves the engine's settings, the pitch and the level at random. Bits and
  * Decimar crush each voice on its own. The engine settings are 0 .. 100; the curves are below. */
@@ -22,7 +30,7 @@ typedef struct {
     int32_t amp;                                 /* the amplitude envelope, Q30 */
     uint32_t adec;                               /* its decay per sample, Q31 */
     int32_t gain;                                /* velocity x level, Q15 */
-    int32_t gl, gr, gs;                          /* pan and send, Q15 */
+    int32_t gl, gr, gs, grs;                     /* pan, the delay's and the reverb's sends, Q15 */
     int32_t e[6];                                /* the engine settings of this hit, 0 .. 100 */
     uint32_t ratio_q16;                          /* Afinar and the variation, as a pitch ratio */
     uint32_t ph[6], dph[6];
@@ -37,7 +45,17 @@ typedef struct {
     int32_t gpos, gstep, gstart, glen, gloops;   /* Glitch: Q16 positions in gl_buf */
     int32_t held;                                /* the decimator's sample */
     uint32_t dcount;
+    int16_t *ks;                                 /* Cuerda: the delay line (KS_N) */
+    int32_t ksp;                                 /* its period, Q16 samples */
+    uint32_t ksw;
+    int32_t ksfb, kslp;                          /* feedback (Q15), the loop's low-pass state */
+    int64_t my1[4], my2[4];                      /* Modal: the resonators' states and coefficients (Q30) */
+    int32_t ma1[4], ma2[4], mg[4];
+    uint32_t arp_ph, arp_inc, vib;               /* Chip */
+    uint32_t arp_dph[3];
 } voice_t;
+#define KS_N 1024u                               /* the string's longest period: 43 Hz */
+static int16_t ks_mem[NTRK + 1][KS_N] __attribute__((section(".pool")));    /* + 1 for the screen's preview */
 static voice_t vo[NTRK];
 static volatile uint32_t ac_hits[NTRK];          /* the screen's flashes: hits counted per track */
 
@@ -74,14 +92,18 @@ static int32_t svf_f(int32_t hz)
     return (int32_t)(((int64_t)hz * 2 * 102944) / FS);     /* 2 pi fc / fs, Q15 (102944 = pi x 32768) */
 }
 
-/* the semitone offset (x 256) snapped to the scale when Cuantizar is on */
-static int32_t snap_semis(int32_t st256)
+/* the scale of a track: its own, or the global one */
+static inline int32_t trk_mode(const int16_t *p) { return p[T_SCALE] ? p[T_SCALE] - 1 : gp[G_MODE]; }
+/* degree d (any integer) of mode m, in semitones above the root */
+static int32_t deg_semis(int32_t m, int32_t d)
 {
-    int32_t st, rel, k, best = 0, bd = 99, m = gp[G_MODE];
-    if (!gp[G_QUANT] || m == 0)
-        return st256;
-    st = (st256 + (st256 >= 0 ? 128 : -128)) / 256;
-    rel = ((st - gp[G_ROOT]) % 12 + 12) % 12;                /* the scale's degrees lie above the root */
+    int32_t n = MODE_N[m], o = d >= 0 ? d / n : -((-d + n - 1) / n);
+    return 12 * o + MODE_DEG[m][d - o * n];
+}
+/* the nearest note of mode m (relative to the root) to st256 (semitones x 256) */
+static int32_t snap_mode(int32_t st256, int32_t m)
+{
+    int32_t st = (st256 + (st256 >= 0 ? 128 : -128)) / 256, rel = ((st % 12) + 12) % 12, k, best = 0, bd = 99;
     for (k = 0; k <= MODE_N[m]; k++) {
         int32_t s = k < MODE_N[m] ? MODE_DEG[m][k] : 12, d = absi(s - rel);
         if (d < bd) {
@@ -92,16 +114,18 @@ static int32_t snap_semis(int32_t st256)
     return (st - rel + best) * 256;
 }
 
-/* sets voice v for a hit with the track values p: velocity 1 .. 127; var: with the per-hit variation */
-static void voice_setup(voice_t *v, const int16_t *p, uint32_t vel, int with_var)
+/* sets voice v for a hit with the track values p: velocity 1 .. 127; deg: the note's degree of the track's scale
+ * (Notas); var: with the per-hit variation */
+static void voice_setup(voice_t *v, const int16_t *p, uint32_t vel, int32_t deg, int with_var)
 {
-    int32_t var = with_var ? p[T_VAR] : 0, i, st;
+    int32_t var = with_var ? p[T_VAR] : 0, i, st, mode = trk_mode(p);
     uint32_t pan;
     v->engine = (uint8_t)p[T_TYPE];
     for (i = 0; i < 6; i++)                                   /* every hit a little different */
         v->e[i] = clampi(p[T_E1 + i] + (int32_t)(var ? ((int32_t)ac_rnd((uint32_t)var + 1u) - var / 2) : 0), 0, 100);
-    st = p[T_TUNE] * 256 + (var > 30 ? (int32_t)ac_rnd((uint32_t)(var - 30) * 8u) - (var - 30) * 4 : 0);
-    st = snap_semis(st);
+    st = p[T_TUNE] * 256 + deg_semis(mode, deg) * 256 + (var > 30 ? (int32_t)ac_rnd((uint32_t)(var - 30) * 8u) - (var - 30) * 4 : 0);
+    if (gp[G_QUANT] || p[T_NOTES])
+        st = snap_mode(st, mode);
     v->ratio_q16 = exp2s_q16((int32_t)(((int64_t)st * 5461) >> 8));
     v->gain = (int32_t)vel * 258 * p[T_LEVEL] / 100;          /* Q15 */
     if (var > 50)
@@ -110,6 +134,7 @@ static void voice_setup(voice_t *v, const int16_t *p, uint32_t vel, int with_var
     v->gl = sin32(pan + 0x40000000u);
     v->gr = sin32(pan);
     v->gs = p[T_SEND] * 327;
+    v->grs = p[T_RSEND] * 327;
     v->crush_bits = (uint8_t)p[T_BITS];
     v->decim = (uint8_t)p[T_DECIM];
     v->dcount = 0;
@@ -180,6 +205,84 @@ static void voice_setup(voice_t *v, const int16_t *p, uint32_t vel, int with_var
             v->adec = 0x7FFFFFFFu;
         break;
     }
+    case EN_PLUCK:
+    case EN_MODAL:
+    case EN_ACID:
+    case EN_CHIP: {
+        uint32_t j;
+        /* the root's note in octave 1 .. 6, times the pitch of the note: a phase step */
+        int32_t note = 12 * (2 + v->e[0] * 5 / 100) + gp[G_ROOT];                 /* C1 .. B6 */
+        int32_t hz16 = (int32_t)(((int64_t)7040 * exp2s_q16((note - 69) * 5461)) >> 16);    /* 440 x 16 */
+        uint32_t d = (uint32_t)(((uint64_t)ph_of_hz16((uint32_t)hz16) * v->ratio_q16) >> 16);
+        v->dph[0] = d;
+        if (v->engine == EN_PLUCK) {
+            uint32_t hz = (uint32_t)(((uint64_t)hz16 * v->ratio_q16) >> 20);      /* Hz */
+            int32_t exc = v->e[3];
+            v->ksp = (int32_t)(((uint64_t)FS << 16) / (hz < 44u ? 44u : hz));
+            if (v->ksp > (int32_t)((KS_N - 2u) << 16))
+                v->ksp = (int32_t)((KS_N - 2u) << 16);
+            v->ksfb = 32768 - (int32_t)(((int64_t)(101 - v->e[1]) * 6000) / 100) / 8;        /* 0.977 .. 0.9998 */
+            v->kslp = 0;
+            v->ksw = 0;
+            {   /* the excitation over one period: noise blended with a pulse, softened by Posición */
+                uint32_t per = (uint32_t)(v->ksp >> 16), passes = (uint32_t)v->e[4] / 20u, q;
+                for (j = 0; j < KS_N; j++) {
+                    int32_t x = 0;
+                    if (j < per) {
+                        int32_t nz = nz_next(v) * 2, pl = j * 2u < per ? 24000 : -24000;
+                        x = nz + (pl - nz) * exc / 100;
+                    }
+                    v->ks[j] = (int16_t)x;
+                }
+                for (q = 0; q < passes; q++)
+                    for (j = 1; j < per; j++)
+                        v->ks[j] = (int16_t)((v->ks[j] + v->ks[j - 1]) >> 1);
+            }
+            v->ksw = (uint32_t)(v->ksp >> 16);
+            v->adec = dec_ms(ex_range(v->e[1], 1500, 4 << 16));                  /* 150 ms .. 2.4 s */
+        } else if (v->engine == EN_MODAL) {
+            static const int32_t SETS[4][4] = {{65536, 180600, 354153, 585400},     /* bar: 1, 2.756, 5.404, 8.933 */
+                                               {65536, 152043, 278528, 434503},     /* glass */
+                                               {65536, 131072, 157286, 196608},     /* bell: 1, 2, 2.4, 3 */
+                                               {65536, 104202, 140247, 173670}};    /* membrane: 1, 1.59, 2.14, 2.65 */
+            int32_t m = v->e[2] * 3, a = m / 100, f = m % 100, tau = ex_range(v->e[1], 200, (int32_t)(5.5 * 65536));
+            for (j = 0; j < 4; j++) {
+                int32_t ra = SETS[a][j], rb = SETS[a < 3 ? a + 1 : 3][j], rr = ra + (rb - ra) * f / 100;
+                uint32_t w;
+                int64_t rq, cw;
+                int32_t n;
+                rr = 65536 + (int32_t)(((int64_t)(rr - 65536) * (80 + v->e[5] * 40 / 100)) / 100);
+                w = (uint32_t)(((uint64_t)d * (uint32_t)rr) >> 16);
+                if (w > 0x30000000u)
+                    w = 0x30000000u;                                              /* below ~8 kHz */
+                n = tau * (int32_t)(FS / 1000u) / 10 / (int32_t)(1u + j * j);        /* higher modes die sooner */
+                rq = (1LL << 30) - (1LL << 30) / (n > 4 ? n : 4);
+                cw = sin32(w + 0x40000000u);
+                v->ma1[j] = (int32_t)((rq * cw) >> 15);                           /* 2 r cos w, Q29 */
+                v->ma2[j] = (int32_t)((rq * rq) >> 31);                           /* r^2, Q29 */
+                v->mg[j] = sin32(w) / (int32_t)(j + 1u);                          /* unit peak, Q15 */
+                v->my1[j] = v->my2[j] = 0;
+            }
+            v->len = (uint32_t)(2 + (100 - v->e[3]) * 2);                            /* the strike: 2 .. 202 samples */
+            v->adec = dec_ms(tau * 3 / 2);
+        } else if (v->engine == EN_ACID) {
+            v->adec = dec_ms(ex_range(v->e[1], 300, 5 << 16));
+            v->dec2 = dec_ms(ex_range(v->e[1], 200, 4 << 16));
+            v->q = 65536 - v->e[3] * 620;                                           /* damping 2 .. 0.14 */
+        } else {                                                                    /* Chip */
+            int32_t k2;
+            v->adec = dec_ms(ex_range(v->e[1], 200, 6 << 16));
+            for (k2 = 0; k2 < 3; k2++) {
+                int32_t s2 = deg_semis(mode, 2 * k2) * 256;                          /* the triad of the scale */
+                v->arp_dph[k2] = (uint32_t)(((uint64_t)d * exp2s_q16(s2 * 5461 / 256)) >> 16);
+            }
+            v->arp_inc = (uint32_t)v->e[3] * 6000u;                                    /* 0 .. 24 notes a second */
+            v->arp_ph = 0;
+            v->vib = 0;
+            v->dec2 = dec_ms(ex_range(v->e[4], 100, 5 << 16));
+        }
+        break;
+    }
     default: {                                                            /* FM */
         static const int32_t RAT[11] = {32768, 65536, 92406, 131072, 180879, 196608, 229376, 275251, 353894, 458752, 530842};
         int32_t hz16 = ex_range(v->e[0], 40 * 16, (int32_t)(5.6 * 65536)), ri = v->e[1] * 10, a = ri / 100, f = ri % 100;
@@ -194,10 +297,32 @@ static void voice_setup(voice_t *v, const int16_t *p, uint32_t vel, int with_var
     v->on = 1;
 }
 
+/* the Notas of each track: a counter, and the Turing loop of 8 degrees */
+static uint32_t nt_i[NTRK];
+static int8_t nt_seq[NTRK][8];
+static int32_t note_degree(uint32_t k)
+{
+    const int16_t *p = tp[k];
+    int32_t top = p[T_RANGE] * MODE_N[trk_mode(p)], i = (int32_t)(nt_i[k]++), d;
+    switch (p[T_NOTES]) {
+    case 1: return (int32_t)ac_rnd((uint32_t)top);                              /* Azar */
+    case 2: return i % top;                                                     /* Sube */
+    case 3: return top - 1 - i % top;                                           /* Baja */
+    case 4: d = i % (2 * top - 2 > 0 ? 2 * top - 2 : 1); return d < top ? d : 2 * top - 2 - d;     /* Péndulo */
+    case 5:                                                                     /* Turing: a loop of 8 that mutates */
+        d = i % 8;
+        if (ac_rnd(100u) < (uint32_t)p[T_TURING] / 2u + 3u || nt_seq[k][d] >= top)
+            nt_seq[k][d] = (int8_t)ac_rnd((uint32_t)top);
+        return nt_seq[k][d];
+    default: return 0;                                                          /* Fija */
+    }
+}
+
 /* a hit on track k: velocity 1 .. 127 */
 static void voice_hit(uint32_t k, uint32_t vel)
 {
-    voice_setup(&vo[k], tp[k], vel, 1);
+    vo[k].ks = ks_mem[k];
+    voice_setup(&vo[k], tp[k], vel, note_degree(k), 1);
     ac_hits[k]++;
 }
 
@@ -313,6 +438,61 @@ static inline int32_t voice_sample(voice_t *v)
         v->gpos += v->gstep;
         break;
     }
+    case EN_PLUCK: {
+        int32_t rd = (int32_t)(v->ksw << 16) - v->ksp, whole, fr, a, b, y;
+        uint32_t i0;
+        rd += (int32_t)(KS_N << 16);
+        whole = (rd >> 16) % (int32_t)KS_N;
+        fr = (rd >> 1) & 0x7FFF;
+        i0 = (uint32_t)whole;
+        a = v->ks[i0];
+        b = v->ks[(i0 + 1u) % KS_N];
+        y = a + (((b - a) * fr) >> 15);
+        v->kslp += mulq15(6000 + v->e[2] * 260, y - v->kslp);              /* Brillo: the loop's low-pass */
+        v->ks[v->ksw] = (int16_t)sat16(mulq15(v->kslp, v->ksfb));
+        v->ksw = (v->ksw + 1u) % KS_N;
+        s = soft(mulq15(y, 32768 + v->e[5] * 650));
+        break;
+    }
+    case EN_MODAL: {
+        int32_t x = 0, j;
+        if (v->t < v->len)                                                  /* the strike: a click and some noise */
+            x = (v->t == 0u ? 30000 : 0) + mulq15(nz_next(v) * 2, v->e[4] * 300) * (int32_t)(v->len - v->t) / (int32_t)v->len;
+        for (j = 0; j < 4; j++) {
+            int64_t y = ((int64_t)v->ma1[j] * v->my1[j] - (int64_t)v->ma2[j] * v->my2[j]) >> 29;     /* Q8 */
+            y += ((int64_t)x * v->mg[j]) >> 7;
+            v->my2[j] = v->my1[j];
+            v->my1[j] = y;
+            s += (int32_t)(y >> 8);
+        }
+        s = clampi(s, -60000, 60000);
+        break;
+    }
+    case EN_ACID: {
+        int32_t w, f, hpo;
+        v->ph[0] += v->dph[0];
+        w = v->e[5] < 50 ? (int32_t)(v->ph[0] >> 16) - 32768 : ((v->ph[0] >> 31) ? 26000 : -26000);
+        f = svf_f(ex_range(v->e[2], 80, 6 << 16) + (int32_t)(((int64_t)v->env2 * v->e[4] * 60) >> 30));
+        v->env2 = env_step(v->env2, v->dec2);
+        v->lp += mulq15(f, v->bp);
+        hpo = w - v->lp - mulq15(v->q, v->bp);
+        v->bp += mulq15(f, hpo);
+        v->lp = clampi(v->lp, -70000, 70000);
+        v->bp = clampi(v->bp, -70000, 70000);
+        s = soft(v->lp >> 1) * 2;
+        break;
+    }
+    case EN_CHIP: {
+        uint32_t d = v->arp_inc ? v->arp_dph[(v->arp_ph >> 30) % 3u] : v->dph[0], pw = 0x10000000u + (uint32_t)v->e[2] * 0x00700000u;
+        int32_t slide = (int32_t)(((int64_t)(1 << 30) - v->env2) >> 14) * (v->e[4] - 50) / 25;   /* +-2 octaves, Q16 */
+        v->arp_ph += v->arp_inc;
+        v->vib += 0x00050000u;                                              /* 3.4 Hz */
+        d = (uint32_t)(((uint64_t)d * exp2s_q16(slide + mulq15(sin32(v->vib), v->e[5] * 20))) >> 16);
+        v->env2 = env_step(v->env2, v->dec2);
+        v->ph[0] += d;
+        s = v->ph[0] < pw ? 22000 : -22000;
+        break;
+    }
     default: {                                                            /* FM */
         int32_t mod, idx = (int32_t)(((int64_t)v->env2 * (v->e[2] * 10)) >> 30);    /* 0 .. 1000 (x0.01 rad) */
         uint32_t off;
@@ -330,7 +510,7 @@ static inline int32_t voice_sample(voice_t *v)
 }
 
 /* the voices into the mix (l, r) and the effects' send, n frames (adds) */
-static void voices_render(int32_t *l, int32_t *r, int32_t *snd, uint32_t n)
+static void voices_render(int32_t *l, int32_t *r, int32_t *snd, int32_t *rsnd, uint32_t n)
 {
     uint32_t k, i;
     for (k = 0; k < NTRK; k++) {
@@ -348,7 +528,7 @@ static void voices_render(int32_t *l, int32_t *r, int32_t *snd, uint32_t n)
                 v->held = (s & mask);
                 v->dcount = v->decim;
             } else {
-                if (v->engine == EN_GLITCH || v->engine == EN_CLICK)
+                if (v->engine == EN_GLITCH || v->engine == EN_CLICK || EN_TONAL(v->engine))
                     (void)voice_sample(v);                                  /* time runs on */
             }
             v->dcount--;
@@ -358,6 +538,7 @@ static void voices_render(int32_t *l, int32_t *r, int32_t *snd, uint32_t n)
             l[i] += mulq15(s, v->gl);
             r[i] += mulq15(s, v->gr);
             snd[i] += mulq15(s, v->gs);
+            rsnd[i] += mulq15(s, v->grs);
             if (v->amp < (1 << 16) && v->engine != EN_GLITCH && v->engine != EN_CLICK)
                 v->on = 0;
             if (v->t > FS * 4u)
