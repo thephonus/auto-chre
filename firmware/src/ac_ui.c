@@ -624,7 +624,16 @@ static void sistema_strip(int32_t top)
     cv_text(8, 46, &AF_S, "Teclas 1-6 tocar  7-12 silenciar", UC_TEXT);
     cv_text(8, 62, &AF_S, "13-17 stutter  18 caos  19 llenar", UC_TEXT);
     cv_text(8, 78, &AF_S, "20 deshacer  21-26 bloquear  27 tap", UC_TEXT);
-    cv_text(8, 100, &AF_S, "ARP mutar ritmo   LFO mutar sonido", UC_MUTED);
+    if (fm1_ms - ac_clk_last_ms < 500u && ac_clk_n) {             /* the MIDI clock: arriving, and its tempo */
+        str_cpy(b, "Reloj MIDI: llega, ", sizeof b);
+        fmt_int(b + str_len(b), (int32_t)((ac_clk_bpm10 + 5u) / 10u));
+        str_cpy(b + str_len(b), " BPM", 6);
+        cv_text(8, 100, &AF_S, b, gp[G_SYNC] ? UC_SAND : UC_WARN);
+        if (!gp[G_SYNC])
+            cv_text_r(234, 100, &AF_S, "(Reloj: Interno)", UC_WARN, UC_BG);
+    } else {
+        cv_text(8, 100, &AF_S, "Reloj MIDI: no llega", gp[G_SYNC] ? UC_WARN : UC_UNLIT);
+    }
     cv_text(8, 114, &AF_S, "OCT- y OCT+ 5 s: actualizar", UC_UNLIT);
     pic_end(top);
 }

@@ -17,7 +17,7 @@
 #define memcmp gh_memcmp
 static volatile uint32_t fm1_ms = 5000;
 static uint16_t fb[240 * 240];
-#define FELUCCA_VERSION "auto-chre 0.1"
+#define FELUCCA_VERSION "auto-chre 0.2"
 static void fm1_wdt_feed(void) {}
 static void lcd_sync(void) {}
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *px)
@@ -190,6 +190,23 @@ int main(int argc, char **argv)
         memset(vo, 0, sizeof vo);
     }
 
+    /* MIDI clock: start, 24 clocks a beat at 120 BPM */
+    {
+        uint32_t c, h0;
+        gp[G_SYNC] = 1;
+        seq_clock_event(0xFAu);
+        for (c = 0; c < 24u * 8u; c++) {
+            fm1_ms += (c % 24u) == 23u ? 500u - 23u * 20u : 20u;   /* 500 ms a beat */
+            seq_clock_event(0xF8u);
+            seq_run();
+        }
+        h0 = ac_hits[0] + ac_hits[1] + ac_hits[2];
+        CHECK(sq.playing && h0 > 0, "MIDI start and clock drive the sequencer");
+        CHECK(ac_clk_bpm10 >= 1190u && ac_clk_bpm10 <= 1210u && gp[G_TEMPO] == 120, "the clock's tempo is read (%u)", ac_clk_bpm10);
+        state_defaults();
+        sq.playing = 0;
+        memset(vo, 0, sizeof vo);
+    }
     /* the polymeters: in 4 bars, a 7-step track at 1/16 comes round 64 / 7 times */
     {
         uint32_t wraps = 0, prev = 0;

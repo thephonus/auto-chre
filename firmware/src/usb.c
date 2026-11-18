@@ -790,8 +790,13 @@ static void midi_in_event(uint32_t pkt)                 /* one USB-MIDI event pa
     uint32_t cin = pkt & 15u, st = (pkt >> 8) & 0xFFu;
     if (cin >= 4u && cin <= 7u) {
         uint32_t k, nb = cin == 4u || cin == 7u ? 3u : cin == 6u ? 2u : 1u;
-        for (k = 0; k < nb; k++)
-            sysex_byte((uint8_t)(pkt >> (8u * (k + 1u))));
+        for (k = 0; k < nb; k++) {
+            uint32_t by = (pkt >> (8u * (k + 1u))) & 0xFFu;
+            if (by == 0xF8u || by == 0xFAu || by == 0xFBu || by == 0xFCu)
+                midi_enqueue(0xFu | by << 8, 1u);       /* realtime sent as a single byte (CIN 5) or inside SysEx */
+            else
+                sysex_byte((uint8_t)by);
+        }
         return;
     }
     if (st >= 0x80u && st < 0xF8u) {

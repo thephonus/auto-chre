@@ -168,8 +168,25 @@ static uint32_t seq_samples_per_tick_q8(void)
 }
 
 /* MIDI realtime (gr_midi): clock, start, continue, stop */
+static volatile uint32_t ac_clk_n, ac_clk_last_ms, ac_clk_bpm10, ac_rt_last;   /* the screen: is a clock coming? */
+static uint32_t clk_mark_ms, clk_mark_n;
 static void seq_clock_event(uint32_t status)
 {
+    ac_rt_last = status;
+    if (status == 0xF8u) {
+        ac_clk_n++;
+        ac_clk_last_ms = fm1_ms;
+        if (ac_clk_n - clk_mark_n >= 24u) {                            /* the tempo over a beat */
+            uint32_t dt = fm1_ms - clk_mark_ms;
+            if (dt > 100u && dt < 3000u) {
+                ac_clk_bpm10 = 600000u / dt;
+                if (gp[G_SYNC])
+                    gp[G_TEMPO] = (int16_t)clampi((int32_t)((ac_clk_bpm10 + 5u) / 10u), GP[G_TEMPO].mn, GP[G_TEMPO].mx);
+            }
+            clk_mark_ms = fm1_ms;
+            clk_mark_n = ac_clk_n;
+        }
+    }
     if (!gp[G_SYNC])
         return;
     if (status == 0xF8u && sq.playing)
