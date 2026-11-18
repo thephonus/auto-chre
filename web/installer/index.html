@@ -1,0 +1,196 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only
+     auto-chre installer. The update protocol (fm1ota.js, fm1pkg.js) is Felucca's, by Leo Kuroshita (@kurogedelic),
+     Hügelton Instruments, GPL-3.0; this page follows Felucca's web/index_pkg.html. -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>auto-chre · instalador</title>
+<style>
+  :root { --bg: #1b1726; --panel: #2b2540; --fg: #f4eee3; --dim: #a79fb8; --sand: #f2c879; --coral: #ff8a70; --warn: #ff6f7f; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 48px 18px; }
+  h1 { font-size: 30px; font-weight: 600; margin: 0 0 4px; color: var(--sand); }
+  .sub { color: var(--dim); margin: 0 0 28px; }
+  p { margin: 0 0 14px; }
+  ol { padding-left: 20px; margin: 0 0 20px; }
+  li { margin-bottom: 6px; }
+  button { font: inherit; font-weight: 600; background: var(--sand); color: var(--bg); border: 0; border-radius: 10px;
+           padding: 10px 26px; cursor: pointer; }
+  button.alt { background: var(--panel); color: var(--fg); }
+  button:disabled { opacity: .35; cursor: default; }
+  .small { color: var(--dim); font-size: 13px; }
+  .box { background: var(--panel); border-radius: 12px; padding: 14px 16px; margin: 20px 0; }
+  #status { margin-top: 16px; min-height: 1.6em; font-weight: 600; }
+  #status.err { color: var(--warn); }
+  #status.ok { color: var(--sand); }
+  progress { width: 100%; height: 6px; margin-top: 16px; accent-color: var(--coral); }
+  pre { color: var(--dim); font-size: 11px; white-space: pre-wrap; margin-top: 16px; max-height: 160px; overflow: auto; }
+  a { color: inherit; }
+  summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>auto-chre</h1>
+  <p class="sub" id="ver">ritmos generativos tipo IDM para el M-VAVE FM-1</p>
+
+  <ol>
+    <li>Abre esta página en <b>Chrome</b> o <b>Edge</b>, en un ordenador.</li>
+    <li>Carga la batería de la FM-1 y conéctala con un <b>cable USB de datos</b>, directa al ordenador (sin hub).</li>
+    <li>Cierra cualquier programa que use MIDI (DAW, editores, otras páginas de firmware).</li>
+    <li>Si tienes otro firmware no oficial (JIANT, SLOOP, Felucca…), <b>vuelve antes al oficial</b> (abajo). Desde el oficial, desde Mini-Grain, amb-iguos o una versión anterior de auto-chre puedes instalar directamente.</li>
+    <li>Pulsa <b>Instalar</b>, permite el acceso MIDI cuando el navegador lo pida y no desconectes nada hasta que ponga «Listo».</li>
+  </ol>
+
+  <p><button id="go" disabled>Instalar</button></p>
+  <progress id="bar" max="100" value="0"></progress>
+  <p id="status"></p>
+
+  <div class="box small">
+    auto-chre 0.1 todavía no se ha probado en una FM-1 real: úsalo bajo tu responsabilidad. Si una instalación se corta,
+    vuelve a pulsar Instalar (la FM-1 se queda en modo actualización hasta terminar). Si se queda en negro:
+    <a href="https://quixotic7.github.io/MvaveFM1Unbricker/" target="_blank" rel="noopener">FM1 Unbricker</a>.
+  </div>
+
+  <details>
+    <summary>Volver al firmware oficial (V15 / V16)</summary>
+    <p class="small" style="margin-top:12px">Elige el archivo <b>FM-1.fwsc</b> oficial sin modificar. Se comprueba aquí, en tu
+      navegador; no se envía a ningún sitio. Tus presets de auto-chre no se guardan al volver al oficial.</p>
+    <p class="small"><b>Usa la V15.</b> Desde auto-chre, amb-iguos, Mini-Grain y otros firmwares hechos sobre Felucca, la FM-1 solo acepta
+      volver a la <b>V15</b>: la V16 cambia el principio de la memoria y el firmware que está corriendo la rechaza antes de
+      escribir nada. M-VAVE ya solo ofrece la V16, pero hay una copia de la V15 en
+      <a href="https://quixotic7.github.io/MvaveFM1Unbricker/" target="_blank" rel="noopener">FM1 Unbricker</a>
+      («Download V15-FM-1.fwsc»). Ya en la V15 oficial, puedes pasar a la V16 con el actualizador de M-VAVE (M-UPGRADE).</p>
+    <p><input id="stock-file" type="file" accept=".fwsc"></p>
+    <p><button id="stock-go" class="alt" disabled>Instalar el firmware oficial</button></p>
+  </details>
+
+  <pre id="log"></pre>
+
+  <p class="small" style="margin-top:28px">
+    auto-chre usa la plataforma de amb-iguos y
+    <a href="https://github.com/eldontyrellcorp/Mini-Grain" target="_blank" rel="noopener">Mini-Grain</a>, que es la Felucca / Mini-Tone de Leo Kuroshita (<a href="https://hugelton.com" target="_blank" rel="noopener">Hügelton Instruments</a>);
+    este instalador usa el protocolo de actualización de
+    <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">Felucca</a>.
+    El paquete incluye tres archivos del SDK AC79 de JieLi (Apache-2.0).
+    <a href="../firmware/LICENSING.md">Licencias</a>: <a href="../firmware/LICENSE">GPL-3.0</a>, sin garantía.
+    M-VAVE y FM-1 son marcas de sus propietarios.
+    Código: <a href="https://github.com/thephonus/auto-chre" target="_blank" rel="noopener">github.com/thephonus/auto-chre</a>
+  </p>
+</main>
+<script type="module">
+import { productOf, logicalImage, validateStockPackage, STOCK_SIZES } from "./fm1pkg.js";
+import { Updater } from "./fm1ota.js";
+
+const $ = (id) => document.getElementById(id);
+const META = { pkg: "../firmware/auto-chre.fwsc", product: "FM-1_947" };
+const TEXT = {
+  start: "Empezando", verify: "Comprobando", loader: "Cambiando al modo actualización", write: "Escribiendo",
+  reboot: "Reiniciando", done: "Listo: la FM-1 ya arranca con auto-chre",
+  stopped: "Se ha detenido. Vuelve a conectar el USB y pulsa Instalar otra vez.",
+  denied: "El navegador no ha permitido MIDI (SysEx). Permítelo en los ajustes del sitio (barra de direcciones) y vuelve a pulsar.",
+  notfound: "No encuentro la FM-1. Comprueba que el cable es de datos, cierra otros programas MIDI y vuelve a pulsar. Si tienes otro firmware no oficial, vuelve antes al oficial.",
+  model: "El aparato conectado no es una FM-1.",
+  lost: "Se ha perdido la conexión USB. Vuelve a conectarla y pulsa Instalar otra vez.",
+  noloader: "No encuentro la FM-1 en modo actualización. Vuelve a conectar el USB y pulsa Instalar otra vez (sigue en ese modo hasta terminar).",
+  noreturn: "La FM-1 no ha vuelto. Apágala y enciéndela.",
+  mismatch: "Escrito, pero la FM-1 dice otra versión: ",
+  badpkg: "El archivo a instalar está dañado. Recarga la página.",
+  badreq: "La FM-1 ha pedido algo inesperado. Vuelve a intentarlo.",
+};
+let image = null, stock = null, writing = false;
+const say = (txt, cls = "") => { $("status").textContent = txt; $("status").className = cls; };
+const log = (t) => { $("log").textContent += t + "\n"; $("log").scrollTop = 1e9; };
+const lock = (on) => { writing = on; $("go").disabled = on || !image; $("stock-go").disabled = on || !stock; $("stock-file").disabled = on; };
+window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = "Escribiendo: no cierres la página."; } });
+
+(async () => {
+  if (!navigator.requestMIDIAccess) { say("Este navegador no puede. Abre la página en Chrome o Edge.", "err"); return; }
+  try {
+    const r = await fetch(META.pkg, { cache: "no-store" });
+    if (!r.ok) throw new Error(`${META.pkg}: HTTP ${r.status}`);
+    const pkg = new Uint8Array(await r.arrayBuffer());
+    if (productOf(pkg) !== META.product) { say(TEXT.badpkg, "err"); return; }
+    image = logicalImage(pkg);
+    try {
+      const v = await (await fetch("../firmware/version.txt", { cache: "no-store" })).text();
+      $("ver").textContent = "ritmos generativos tipo IDM para el M-VAVE FM-1 · " + v.trim();
+    } catch (_) {}
+    lock(false);
+  } catch (e) { say("No se pudo cargar el firmware: " + e.message, "err"); }
+})();
+
+function stepper(total) {
+  return (k, a) => {
+    log(`${k} ${a ?? ""}`);
+    if (k === "verify" && total) $("bar").value = (a / total) * 100;
+    if (k === "write" && total) $("bar").value = ((74 + a) / total) * 100;
+    if (k === "done") $("bar").value = 100;
+    if (TEXT[k] && k !== "done") say(TEXT[k] + "…");
+  };
+}
+
+async function run(img, product) {
+  let midi;
+  try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
+  catch (e) { say(TEXT.denied, "err"); return false; }
+  const up = new Updater(midi, log), step = stepper(74 + 1167);
+  const ota = await up.find((id) => /^ota-/i.test(id.model));
+  if (ota) {
+    ota.link.close();
+    return await up.resume(img, step, product);
+  }
+  await up.install(img, product, step);
+  return true;
+}
+
+$("go").addEventListener("click", async () => {
+  if (writing || !image) return;
+  lock(true);
+  try {
+    say(TEXT.start + "…");
+    if (await run(image, META.product)) say(TEXT.done, "ok"); else say(TEXT.stopped, "err");
+  } catch (e) {
+    say(e && e.code && TEXT[e.code] ? TEXT[e.code] + (e.detail || "") : "Error: " + (e && e.message), "err");
+    log(String(e && e.stack || e));
+  }
+  lock(false);
+});
+
+$("stock-file").addEventListener("change", async () => {
+  const file = $("stock-file").files[0];
+  stock = null; lock(false);
+  if (!file) return;
+  try {
+    if (!STOCK_SIZES.includes(file.size)) throw new Error("no es el FM-1.fwsc oficial V15 o V16 sin modificar");
+    stock = await validateStockPackage(new Uint8Array(await file.arrayBuffer()));
+    if (stock.version === "V16")
+      say("Es la V16 oficial. Ojo: desde auto-chre, amb-iguos o Mini-Grain la FM-1 la rechaza; usa la V15 (enlace arriba).", "err");
+    else
+      say("Firmware oficial comprobado: " + stock.version, "ok");
+  } catch (e) { say("No puedo usar ese archivo: " + e.message, "err"); }
+  lock(false);
+});
+
+$("stock-go").addEventListener("click", async () => {
+  if (writing || !stock) return;
+  if (!confirm("Vas a volver al firmware oficial " + stock.version + ". Los presets de auto-chre no se conservan. ¿Seguir?")) return;
+  lock(true);
+  try {
+    if (await run(stock.image, stock.product)) say("Listo: firmware oficial " + stock.version + " instalado", "ok");
+    else say(TEXT.stopped, "err");
+  } catch (e) {
+    if (e && e.code === "stopped" && stock.version === "V16")
+      say("La FM-1 ha rechazado la V16 sin escribir nada (es normal desde firmwares hechos sobre Felucca). Usa la V15: mira el enlace de arriba.", "err");
+    else
+    say(e && e.code && TEXT[e.code] ? TEXT[e.code] + (e.detail || "") : "Error: " + (e && e.message), "err");
+    log(String(e && e.stack || e));
+  }
+  lock(false);
+});
+</script>
+</body>
+</html>

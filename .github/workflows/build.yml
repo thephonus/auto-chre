@@ -1,0 +1,49 @@
+# Builds the installable package (auto-chre.fwsc) with JieLi's toolchain and runs the computer tests.
+# The package is attached to each run as an artifact ("auto-chre-fwsc"); a tag vX.Y also makes a release.
+name: build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python packages
+        run: pip install Pillow fonttools numpy mido
+      - name: JieLi toolchain
+        run: sh tools/get_toolchain.sh
+      - name: JieLi AC79 SDK (three files of it are packed)
+        run: git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
+      - name: Tests on the computer
+        run: sh tests/run_tests.sh
+      - name: Build
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then sh build.sh --release "${GITHUB_REF_NAME#v}"; else sh build.sh; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: auto-chre-fwsc
+          path: build/*.fwsc
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/auto-chre-*.fwsc --title "auto-chre $GITHUB_REF_NAME" --notes "Ver README" || true
+      - name: Web installer (GitHub Pages, branch gh-pages)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/make_site.py build/auto-chre.fwsc "0.1 (${GITHUB_SHA::7})" site
+          cd site
+          git init -q
+          git checkout -q -b gh-pages
+          git add -A
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -qm "site ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
