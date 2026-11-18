@@ -486,7 +486,7 @@ static inline int32_t voice_sample(voice_t *v)
         uint32_t d = v->arp_inc ? v->arp_dph[(v->arp_ph >> 30) % 3u] : v->dph[0], pw = 0x10000000u + (uint32_t)v->e[2] * 0x00700000u;
         int32_t slide = (int32_t)(((int64_t)(1 << 30) - v->env2) >> 14) * (v->e[4] - 50) / 25;   /* +-2 octaves, Q16 */
         v->arp_ph += v->arp_inc;
-        v->vib += 0x00050000u;                                              /* 3.4 Hz */
+        v->vib += 5u << 16;                                                   /* 3.4 Hz */
         d = (uint32_t)(((uint64_t)d * exp2s_q16(slide + mulq15(sin32(v->vib), v->e[5] * 20))) >> 16);
         v->env2 = env_step(v->env2, v->dec2);
         v->ph[0] += d;
