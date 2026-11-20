@@ -23,7 +23,7 @@ static const char *const SC_TITLE[SC_COUNT] = {"Patr\363n", "Sonido", "Voz", "Ri
 #define CELL_H 80
 
 /* a cell: a track value, a shared value, or a preset action */
-enum { CL_NONE, CL_T, CL_G, CL_SLOT, CL_LOAD };
+enum { CL_NONE, CL_T, CL_G, CL_SLOT, CL_LOAD, CL_CLEAR, CL_NEW };
 typedef struct { uint8_t kind, arg; } cl_t;
 
 static struct {
@@ -152,7 +152,7 @@ static const cl_t PG_FX[4][4] = {{G_(G_COMBHZ), G_(G_COMBFB), G_(G_COMBMIX), G_(
                                  {G_(G_STUTP), G_(G_STUTL), NONE_, NONE_}};
 static const cl_t PG_AFINAR[1][4] = {{G_(G_ROOT), G_(G_MODE), G_(G_QUANT), T_(T_SCALE)}};
 static const cl_t PG_SISTEMA[1][4] = {{G_(G_MIDICH), G_(G_SYNC), NONE_, NONE_}};
-static const cl_t PG_PRESETS[1][4] = {{{CL_SLOT, 0}, {CL_LOAD, 0}, NONE_, NONE_}};
+static const cl_t PG_PRESETS[1][4] = {{{CL_SLOT, 0}, {CL_LOAD, 0}, {CL_CLEAR, 0}, {CL_NEW, 0}}};
 
 static const char *ui_page_name(uint32_t sc, uint32_t sub)
 {
@@ -251,6 +251,14 @@ static void describe(const cl_t *cl, cell_t *c)
         c->kind = CK_ACTION;
         c->empty = !((presets_mask >> ui.slot) & 1);
         str_cpy(c->value, c->empty ? "vac\355a" : "gira >", sizeof c->value);
+    } else if (cl->kind == CL_CLEAR) {
+        c->name = "Vaciar";
+        c->kind = CK_ACTION;
+        str_cpy(c->value, "gira >", sizeof c->value);
+    } else if (cl->kind == CL_NEW) {
+        c->name = "Nuevo";
+        c->kind = CK_ACTION;
+        str_cpy(c->value, "gira >", sizeof c->value);
     } else {
         c->empty = 1;
         c->name = "";

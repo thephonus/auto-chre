@@ -45,7 +45,7 @@ Caja de ritmos generativa para el **M-VAVE FM-1**: percusión sintética, ritmos
 | **FX** | EFECTOS: comb, delay y salida, reverb, stutter. |
 | **SCL** | AFINAR: raíz, escala global, cuantizar y escala de la pista. |
 | **GLO** | SISTEMA: batería, CPU, canal MIDI, reloj y el mapa de teclas. |
-| **SAVE** | PRESETS. Dentro de PRESETS, SAVE guarda (dos veces si la ranura ya está ocupada) y K2 a la derecha carga. |
+| **SAVE** | PRESETS. Dentro de PRESETS, SAVE guarda (dos veces si la ranura ya está ocupada) y K2 a la derecha carga. K3 a la derecha (*Vaciar*) borra los ritmos de las 6 pistas sin tocar los sonidos; K4 a la derecha (*Nuevo*) empieza de cero: sonidos de fábrica y ritmos vacíos, manteniendo tempo, escala y efectos. Las dos se deshacen con la tecla 20. |
 | **PLAY / REC** | Arrancar o parar / grabar lo que tocas con las teclas en el patrón. |
 | **ARP / LFO** | Mutar ritmo / mutar sonido. |
 | **K1–K4** | Los cuatro diales de la pantalla. |

@@ -56,6 +56,21 @@ static void ui_turn(const cl_t *cl, int32_t d, int32_t accel)
         } else {
             ui_notice("Ranura vac\355a");
         }
+    } else if ((cl->kind == CL_CLEAR || cl->kind == CL_NEW) && d > 0) {
+        uint32_t k;
+        undo_save();                                   /* key 20 brings it back */
+        if (cl->kind == CL_NEW) {                      /* the factory tracks, the tempo, scale and effects stay */
+            int16_t keep[G_COUNT];
+            memcpy(keep, gp, sizeof keep);
+            state_defaults();
+            memcpy(gp, keep, sizeof keep);
+        }
+        for (k = 0; k < NTRK; k++) {
+            tp[k][T_PULSES] = 0;
+            tp[k][T_ROT] = 0;
+            pat_euclid(k);
+        }
+        ui_notice(cl->kind == CL_NEW ? "Nuevo (20: deshacer)" : "Ritmos vac\355os (20: deshacer)");
     }
 }
 
