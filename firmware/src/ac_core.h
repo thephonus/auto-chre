@@ -104,16 +104,16 @@ static const char *const STUT_NAMES[] = {"1/4", "1/8", "1/16", "1/32", "1/64"};
 static const uint8_t STUT_TICKS[] = {96, 48, 24, 12, 6};
 static const char *const NOSI[] = {"No", "S\355"};
 static const char *const SCALE_NAMES[] = {"Global", "Crom\341tica", "Mayor", "Menor", "D\363rico", "Frigio", "Penta men.",
-                                          "Hirajoshi", "Tonos ent."};
+                                          "Hirajoshi", "Tonos ent.", "Mixolidio", "Lidio"};
 static const char *const SYNC_NAMES[] = {"Interno", "MIDI"};
 static const char *const KEY_NAMES[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
-#define NMODES 8
+#define NMODES 10
 static const char *const MODE_NAMES[NMODES] = {"Crom\341tica", "Mayor", "Menor", "D\363rico", "Frigio", "Penta men.",
-                                               "Hirajoshi", "Tonos ent."};
-static const uint8_t MODE_N[NMODES] = {12, 7, 7, 7, 7, 5, 5, 6};
+                                               "Hirajoshi", "Tonos ent.", "Mixolidio", "Lidio"};
+static const uint8_t MODE_N[NMODES] = {12, 7, 7, 7, 7, 5, 5, 6, 7, 7};
 static const uint8_t MODE_DEG[NMODES][12] = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, {0, 2, 4, 5, 7, 9, 11}, {0, 2, 3, 5, 7, 8, 10},
                                              {0, 2, 3, 5, 7, 9, 10}, {0, 1, 3, 5, 7, 8, 10}, {0, 3, 5, 7, 10}, {0, 2, 3, 7, 8},
-                                             {0, 2, 4, 6, 8, 10}};
+                                             {0, 2, 4, 6, 8, 10}, {0, 2, 4, 5, 7, 9, 10}, {0, 2, 4, 6, 7, 9, 11}};
 
 /* a track's parameters */
 enum { T_TYPE, T_E1, T_E2, T_E3, T_E4, T_E5, T_E6, T_VAR, T_LEVEL, T_PAN, T_SEND, T_RSEND, T_TUNE, T_NOTES, T_RANGE,
